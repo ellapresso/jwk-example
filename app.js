@@ -9,27 +9,27 @@ const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 app.get("/", async (req, res) => {
-  const fs = require("fs");
-
-  const jose = require("node-jose");
+  const ks = fs.readFileSync("keys.json");
+  const temp = JSON.parse(ks);
 
   const keyStore = jose.JWK.createKeyStore();
 
   keyStore.generate("RSA", 2048, { alg: "RS256", use: "sig" }).then(result => {
-    fs.writeFileSync(
-      "Keys.json",
-      JSON.stringify(keyStore.toJSON(true), null, "  ")
-    );
+    const newKey = keyStore.toJSON(true);
+    newKey.keys.push(temp.keys[0]);
+    fs.writeFileSync("Keys.json", JSON.stringify(newKey, null, "  "));
   });
   res.sendStatus(200);
 });
 
 app.get("/jwks", async (req, res) => {
-  const ks = fs.readFileSync("keys.json");
+  const ks = fs.readFileSync("keys.json") || { keys: [] };
 
-  const keyStore = await jose.JWK.asKeyStore(ks.toString());
+  const keyStore = ks.keys.length
+    ? await jose.JWK.asKeyStore(ks.toString())
+    : "{keys:[]}";
 
-  res.send(keyStore.toJSON());
+  res.send(keyStore);
 });
 
 app.get("/tokens", async (req, res) => {
@@ -56,16 +56,16 @@ app.get("/verify", async (req, res) => {
   let resourcePath = "/jwks";
 
   let token =
-    "eyJ0eXAiOiJqd3QiLCJhbGciOiJSUzI1NiIsImtpZCI6IjJzZmtNN2F1VllhQlZrbGU0d0hPai1fNElFTV9qNHVYbEFyVUhORUk5V3cifQ.eyJleHAiOjE2NjAyOTkyMjEsImlhdCI6MTY2MDI5OTE4NSwic3ViIjoidGVzdCJ9.v_7S4ux8bHo67IhgCA2H1176_xwm3eKAeW_Bm3bY-Zfrs9VCtCAeF3PVEOihZXSPhPlpTJhs6DTjS0EqisjHwb5fKsS657ZsKTgE9VeLgoTAg4IiFT9GHqgo9i-L0Y6x5YYe6qPqMBy__wL_sBcqqSktwBgozWmSPni5-zw7uZMk7db_e3OspYkfmzBykAPiZWtT1a2WF19Rt8iRuhhY4npCwQmUQeBalO-j7GJrFgWBJHR2BpGf3D9q5cnmidm8Ithjw-vpxcuxQ9PRUf5oXt9LhWSNITP9rBPz2qX_PESKyFoce6bnHm5-pHJ-wvOBUgPa22ez3tZ_eSZh1YLzug";
+    "eyJ0eXAiOiJqd3QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImhwUnFvSUtIU0pVUE94eHhkZ1BzbU8yaTF3dWp6cjF0cTBOMXlGVlREdmcifQ.eyJleHAiOjE2NjA2MTcyMTYsImlhdCI6MTY2MDYxNzE4MCwic3ViIjoidGVzdCJ9.HVOWSsSRZ9W4kWTofYLC09iWI7huH_L8IuziskXX_xuVRb8uaHMCU8oLE7I9j4u_tSyiND1y2EVOIE4GH3pYwzQNayCr_T1ExEBNdXt_0PtjutKfbIOvaSxKx3D09wbtUzqBdV71Np5oR6Cj0Dlys7cW8yaiGQ3BVr1tpqA1pR-YNRihdQE9Tc7raqnCp8tYz4iEmVw2Hiz9WFjpQweSGf0Ss1pwpTX-6UIu4V7XgQZN2cAdHfEZ1oyqI3k-ARkLnawIfaViMt7wuVEwtnIiPPs5699c6dPzy291FEgDnIzHun21acJ9OoARb_fVdlQI4A2VwvKFgeJYlQVYf5C_sg";
 
   let decodedToken = jwt.decode(token, { complete: true });
 
-  let kid = decodedToken.header.kid;
+  const kid = decodedToken.header.kid;
   const ks = fs.readFileSync("keys.json");
   const keyStore = await jose.JWK.asKeyStore(ks.toString());
   const jwksResponse = keyStore.toJSON();
-  const firstKey = jwksResponse.keys[0];
-  const publicKey = jwktopem(firstKey);
+  const publicKey = jwktopem(_.find(jwksResponse.keys, { kid }));
+
   try {
     const decoded = jwt.verify(token, publicKey);
     res.send(decoded);
